@@ -3,6 +3,7 @@ import TModal from "@/component/common/modal/TModal";
 import ButtonBase from "@/component/common/button/ButtonBase";
 import SelectboxBase from "@/component/common/input/SelectboxBase";
 import DatePickerBase from "@/component/common/datepicker/DatePickerBase";
+import { getCarStatuses } from "@/service/business/carMng/carMng.service";
 
 interface CarReceiveItem {
   id: string;
@@ -11,6 +12,7 @@ interface CarReceiveItem {
   licensePlate: string;
   odometer: number | string;
   condition: string;
+  status?: string; // Thêm field status
 }
 
 interface Props {
@@ -23,7 +25,7 @@ interface Props {
   defaultTime?: string;
   totalCar?: number;
   totalSurcharge?: number;
-  carStatusOptions?: { value: string; label: string }[];
+  // carStatusOptions?: { value: string; label: string }[];
 }
 
 const ModalUpdateInfoPickup = ({
@@ -36,8 +38,8 @@ const ModalUpdateInfoPickup = ({
   defaultTime = "",
   totalCar = 0,
   totalSurcharge = 0,
-  carStatusOptions = [],
-}: Props) => {
+}: // carStatusOptions = [],
+Props) => {
   const [staff, setStaff] = useState(defaultStaff);
   const [time, setTime] = useState(defaultTime);
   const [carStates, setCarStates] = useState<CarReceiveItem[]>(
@@ -45,8 +47,12 @@ const ModalUpdateInfoPickup = ({
       ...c,
       odometer: c.odometer || "",
       condition: c.condition || "",
+      status: c.status || "", // Thêm status vào state
     }))
   );
+  const [carStatusOptions, setCarStatusOptions] = useState<
+    { value: string; label: string }[]
+  >([{ value: "", label: "Chọn trạng thái" }]);
 
   useEffect(() => {
     setStaff(defaultStaff);
@@ -56,8 +62,18 @@ const ModalUpdateInfoPickup = ({
         ...c,
         odometer: c.odometer || "",
         condition: c.condition || "",
+        status: c.status || "", // Thêm status vào state
       }))
     );
+    getCarStatuses().then((res) => {
+      setCarStatusOptions([
+        { value: "", label: "Chọn trạng thái" },
+        ...(res.data || []).map((s: any) => ({
+          value: s.code,
+          label: s.name,
+        })),
+      ]);
+    });
   }, [open, cars, defaultStaff, defaultTime]);
 
   const totalAll = (totalCar || 0) + (totalSurcharge || 0);
@@ -126,7 +142,7 @@ const ModalUpdateInfoPickup = ({
               <th style={{ width: 140 }}>Mẫu xe</th>
               <th style={{ width: 120 }}>Biển số xe</th>
               <th style={{ width: 120 }}>Cập nhật Odometer</th>
-              <th style={{ width: 160 }}>Tình trạng</th>
+              <th style={{ width: 160 }}>Trạng thái</th>
             </tr>
           </thead>
           <tbody>
@@ -155,15 +171,12 @@ const ModalUpdateInfoPickup = ({
                 </td>
                 <td>
                   <SelectboxBase
-                    value={car.condition}
-                    options={[
-                      { value: "", label: "Chọn tình trạng" },
-                      ...(carStatusOptions || []),
-                    ]}
+                    value={car.status}
+                    options={carStatusOptions}
                     onChange={(val) =>
                       handleCarChange(
                         idx,
-                        "condition",
+                        "status",
                         typeof val === "string" ? val : val[0] || ""
                       )
                     }
