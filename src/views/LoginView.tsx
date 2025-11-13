@@ -5,7 +5,7 @@ import ButtonBase from "@/component/common/button/ButtonBase";
 import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import Logo from "@/assets/images/motorbike_logo.png";
 import { loginBasicAdmin } from "@/service/common/auth/AuthService";
-import { setUserInfo } from "@/utils/storage";
+import { setUserInfo, setToken } from "@/utils/storage";
 import { jwtDecode } from "jwt-decode";
 import { useNavigate } from "react-router-dom";
 import { SCREEN } from "@/router/screen";
@@ -42,6 +42,7 @@ const LoginView = () => {
         expiresIn: res.data.expiresIn,
         userCurrent,
       });
+      setToken(res.data.accessToken);
       setLoading(false);
       navigate(SCREEN.dashboard.path);
       // TODO: Redirect to dashboard or home
@@ -212,6 +213,7 @@ const LoginView = () => {
                 textDecoration: "none",
                 transition: "color 0.2s",
               }}
+              onClick={(e) => e.preventDefault()}
               onMouseOver={(e) => (e.currentTarget.style.color = "#0d47a1")}
               onMouseOut={(e) => (e.currentTarget.style.color = "#1677ff")}
             >
@@ -252,23 +254,6 @@ const LoginView = () => {
           filter: "drop-shadow(0 2px 12px #1677ff33)",
         }}
       />
-      {/* Footer */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 24,
-          left: 0,
-          right: 0,
-          textAlign: "center",
-          color: "#888",
-          fontSize: 14,
-          zIndex: 2,
-          letterSpacing: 0.2,
-          textShadow: "0 1px 4px #fff",
-        }}
-      >
-        © {new Date().getFullYear()} BookBike Hà Giang. All rights reserved.
-      </div>
     </div>
   );
 };
