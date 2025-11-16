@@ -236,17 +236,15 @@ const ContractDetailComponent = () => {
   const handleDeliverySave = async (data: any) => {
     if (!contract) return;
     // Chuẩn hóa danh sách xe cho API, truyền startOdometer lấy từ detail
-    const cars: ContractCarSaveDTO[] = (contract.cars || []).map(
-      (c: any) => ({
-        id: c.id,
-        carId: c.carId || c.id,
-        dailyPrice: c.dailyPrice,
-        hourlyPrice: c.hourlyPrice,
-        totalAmount: c.totalAmount,
-        startOdometer: c.startOdometer, // luôn truyền startOdometer từ detail
-        notes: c.notes,
-      })
-    );
+    const cars: ContractCarSaveDTO[] = (contract.cars || []).map((c: any) => ({
+      id: c.id,
+      carId: c.carId || c.id,
+      dailyPrice: c.dailyPrice,
+      hourlyPrice: c.hourlyPrice,
+      totalAmount: c.totalAmount,
+      startOdometer: c.startOdometer, // luôn truyền startOdometer từ detail
+      notes: c.notes,
+    }));
     await updateDelivery({
       contractId: contract.id,
       cars,
