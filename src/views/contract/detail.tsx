@@ -57,43 +57,51 @@ function calcRentalInfo(
   dailyPrice: number,
   hourlyPrice: number
 ) {
-  if (!start || !end || !dailyPrice)
+  if (!start || !end || (!dailyPrice && !hourlyPrice))
     return { days: 0, extraHours: 0, total: 0, durationText: "" };
   const ms = new Date(end).getTime() - new Date(start).getTime();
   if (ms <= 0) return { days: 0, extraHours: 0, total: 0, durationText: "" };
   let totalHours = Math.ceil(ms / (1000 * 60 * 60));
-  let days = Math.floor(totalHours / 24);
-  let extraHours = totalHours % 24;
-
-  // Nếu chỉ thuê vài tiếng trong ngày đầu tiên, vẫn tính là 1 ngày
-  if (days === 0) {
-    days = 1;
-    extraHours = 0;
-  } else {
-    // Nếu giờ phát sinh > 8h thì làm tròn thành 1 ngày
-    if (extraHours > 8) {
-      days += 1;
-      extraHours = 0;
-    }
-  }
-
-  // Nếu trả xe trễ dưới 30 phút thì không tính thêm giờ phát sinh
-  const msMod = ms % (1000 * 60 * 60);
-  if (days > 0 && msMod <= 1000 * 60 * 30 && extraHours > 0) {
-    extraHours -= 1;
-    if (extraHours < 0) extraHours = 0;
-  }
-
-  const total = dailyPrice * days + hourlyPrice * extraHours;
-  // Chuỗi mô tả thời gian thuê
+  let days = 0;
+  let extraHours = 0;
+  let total = 0;
   let durationText = "";
-  if (days > 0 && extraHours > 0) {
-    durationText = `${days} ngày ${extraHours} giờ`;
-  } else if (days > 0) {
-    durationText = `${days} ngày`;
-  } else {
-    durationText = `${extraHours} giờ`;
+
+  if (dailyPrice) {
+    days = Math.floor(totalHours / 24);
+    extraHours = totalHours % 24;
+    // Nếu chỉ thuê vài tiếng trong ngày đầu tiên, vẫn tính là 1 ngày
+    if (days === 0) {
+      days = 1;
+      extraHours = 0;
+    } else {
+      // Nếu giờ phát sinh > 8h thì làm tròn thành 1 ngày
+      if (extraHours > 8) {
+        days += 1;
+        extraHours = 0;
+      }
+    }
+    // Nếu trả xe trễ dưới 30 phút thì không tính thêm giờ phát sinh
+    const msMod = ms % (1000 * 60 * 60);
+    // Sửa: chỉ trừ 1 giờ nếu msMod > 0 (tức là có phút lẻ), tránh trừ ở các mức tròn giờ
+    if (days > 0 && msMod > 0 && msMod <= 1000 * 60 * 30 && extraHours > 0) {
+      extraHours -= 1;
+      if (extraHours < 0) extraHours = 0;
+    }
+    total = dailyPrice * days + (hourlyPrice || 0) * extraHours;
+    if (days > 0 && extraHours > 0) {
+      durationText = `${days} ngày ${extraHours} giờ`;
+    } else if (days > 0) {
+      durationText = `${days} ngày`;
+    } else {
+      durationText = `${extraHours} giờ`;
+    }
+  } else if (hourlyPrice) {
+    // Nếu chỉ có giá giờ
+    total = hourlyPrice * totalHours;
+    durationText = `${totalHours} giờ`;
   }
+
   return { days, extraHours, total, durationText };
 }
 
@@ -221,8 +229,9 @@ const ContractDetailComponent = () => {
   );
   // Tổng cộng
   const totalAll = totalCar + totalSurcharge;
-  // Còn lại
-  const remain = totalAll - totalPaid;
+  // Còn lại (đã sửa công thức: trừ thêm giảm giá)
+  const remain =
+    totalCar + totalSurcharge - (contract.discountAmount || 0) - totalPaid;
 
   // Status icon
   const statusIcon =
@@ -677,7 +686,6 @@ const ContractDetailComponent = () => {
                       <tr>
                         <td style={{ color: "#888" }}>Ngày đặt</td>
                         <td>
-                          {/* Sử dụng createdDate nếu có, nếu không thì để trống */}
                           {contract.createdDate
                             ? contract.createdDate
                                 .replace("T", " ")
@@ -1002,11 +1010,28 @@ const ContractDetailComponent = () => {
                     marginBottom: 4,
                   }}
                 >
+                  <span>Giảm giá:</span>
+                  <span>
+                    {(contract.discountAmount || 0).toLocaleString()} đ
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 4,
+                  }}
+                >
                   <span>
                     <b>Tổng tiền:</b>
                   </span>
                   <span>
-                    <b>{totalAll.toLocaleString()} đ</b>
+                    <b>
+                      {(
+                        totalAll - (contract.discountAmount || 0)
+                      ).toLocaleString()}{" "}
+                      đ
+                    </b>
                   </span>
                 </div>
               </div>
@@ -1032,7 +1057,7 @@ const ContractDetailComponent = () => {
                     {remain >= 0 ? "Phải thu khách:" : "Phải trả khách:"}
                   </span>
                   <span style={{ color: "#1677ff", fontWeight: 600 }}>
-                    {remain.toLocaleString()} đ
+                    {Math.abs(remain).toLocaleString()} đ
                   </span>
                 </div>
               </div>
@@ -1114,6 +1139,7 @@ const ContractDetailComponent = () => {
           onSave={handlePickupSave}
           cars={(contract.cars || []).map((c) => ({
             id: c.id,
+            carId: c.carId,
             type: c.carType,
             model: c.carModel,
             licensePlate: c.licensePlate,

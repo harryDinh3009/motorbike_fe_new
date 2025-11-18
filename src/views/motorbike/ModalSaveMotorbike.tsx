@@ -31,7 +31,34 @@ interface Props {
 
 const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
   const [activeTab, setActiveTab] = useState("1");
-  const [form, setForm] = useState({
+  type FormState = {
+    model: string;
+    branch: string;
+    license: string;
+    condition: string;
+    odometer: string;
+    note: string;
+    image: string | File;
+    imageUrl: string;
+    imagePreview: string;
+    year: string;
+    origin: string;
+    value: string;
+    frameNo: string;
+    engineNo: string;
+    color: string;
+    regNo: string;
+    regName: string;
+    regPlace: string;
+    insuranceNo: string;
+    insuranceExpire: string;
+    carType: string;
+    dailyPrice: string;
+    hourlyPrice: string;
+    status: string;
+  };
+
+  const [form, setForm] = useState<FormState>({
     model: "",
     branch: "",
     license: "",
@@ -40,6 +67,7 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
     note: "",
     image: "",
     imageUrl: "",
+    imagePreview: "",
     year: "",
     origin: "",
     value: "",
@@ -82,15 +110,8 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
     { value: "", label: "Trạng thái" },
   ]);
 
+  // Fetch static options on mount
   useEffect(() => {
-    // Lấy chi nhánh của user hiện tại
-    getBranchByCurrentUser().then((res) => {
-      if (res.data) {
-        setCurrentBranch({ value: res.data.id, label: res.data.name });
-        setForm((prev) => ({ ...prev, branch: res.data.id }));
-        setBranchOptions([{ value: res.data.id, label: res.data.name }]);
-      }
-    });
     getCarModels().then((res) => {
       setModelOptions([
         { value: "", label: "Mẫu xe" },
@@ -138,6 +159,19 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
     });
   }, []);
 
+  // Always fetch current branch when modal opens
+  useEffect(() => {
+    if (open) {
+      getBranchByCurrentUser().then((res) => {
+        if (res.data) {
+          setCurrentBranch({ value: res.data.id, label: res.data.name });
+          setForm((prev) => ({ ...prev, branch: res.data.id }));
+          setBranchOptions([{ value: res.data.id, label: res.data.name }]);
+        }
+      });
+    }
+  }, [open]);
+
   // Reset form khi mở modal mới
   useEffect(() => {
     if (motorbike) {
@@ -151,6 +185,7 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
         condition: motorbike.condition || "",
         color: motorbike.color || "",
         imageUrl: motorbike.imageUrl || "",
+        imagePreview: "",
       });
     } else {
       setForm({
@@ -162,6 +197,7 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
         note: "",
         image: "",
         imageUrl: "",
+        imagePreview: "",
         year: "",
         origin: "",
         value: "",
@@ -192,8 +228,14 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
     try {
       if (
         form.image &&
-        typeof form.image !== "string" &&
-        form.image instanceof File &&
+        typeof form.image === "object" &&
+        form.image !== null &&
+        "name" in form.image &&
+        "size" in form.image &&
+        "type" in form.image &&
+        typeof form.image.name === "string" &&
+        typeof form.image.size === "number" &&
+        typeof form.image.type === "string" &&
         motorbike?.id
       ) {
         const imgRes = await uploadCarImage(motorbike.id, form.image);
@@ -240,7 +282,8 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
             >
               <div style={{ gridColumn: "span 2" }}>
                 <SelectboxBase
-                  label="Mẫu xe"
+                  id="model"
+                  label={<span>Mẫu xe <span style={{ color: 'red' }}>*</span></span>}
                   required
                   value={form.model}
                   options={modelOptions}
@@ -251,7 +294,8 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
               </div>
               <div>
                 <SelectboxBase
-                  label="Chi nhánh sở hữu"
+                  id="branch"
+                  label={<span>Chi nhánh sở hữu <span style={{ color: 'red' }}>*</span></span>}
                   required
                   value={form.branch}
                   options={branchOptions}
@@ -316,7 +360,8 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
                 {" "}
                 <label>Biển số xe</label>
                 <InputBase
-                  label="Biển số xe"
+                  id="license"
+                  label={<span>Biển số xe <span style={{ color: 'red' }}>*</span></span>}
                   required
                   modelValue={form.license}
                   placeholder="Ví dụ: 34E-06869"
@@ -352,6 +397,7 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
               </div>
               <div style={{ gridColumn: "span 2" }}>
                 <TextAreaBase
+                  id="note"
                   label="Ghi chú"
                   placeholder="Nhập ghi chú"
                   defaultValue={form.note}
@@ -391,19 +437,28 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
                 boxSizing: "border-box",
               }}
             >
-              {form.imageUrl || form.imagePreview ? (
-                <ImageBase
-                  src={form.imagePreview || form.imageUrl}
-                  width={180}
-                  height={180}
-                  alt="Ảnh xe"
+              {form.imagePreview || form.imageUrl ? (
+                <div
                   style={{
                     borderRadius: 8,
-                    objectFit: "cover",
+                    overflow: "hidden",
+                    width: 180,
+                    height: 180,
                     marginBottom: 12,
                     boxShadow: "0 2px 8px #eee",
+                    background: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
-                />
+                >
+                  <ImageBase
+                    src={form.imagePreview || form.imageUrl}
+                    width={180}
+                    height={180}
+                    alt="Ảnh xe"
+                  />
+                </div>
               ) : (
                 <>
                   <div
@@ -453,11 +508,13 @@ const ModalSaveMotorbike = ({ open, motorbike, onClose, onSave }: Props) => {
                 }}
                 onClick={() => fileInputRef.current?.click()}
               />
-              {form.image && typeof form.image !== "string" && (
-                <div style={{ marginTop: 8, fontSize: 13, color: "#666" }}>
-                  {form.image.name}
-                </div>
-              )}
+              {form.image &&
+                typeof form.image === "object" &&
+                "name" in form.image && (
+                  <div style={{ marginTop: 8, fontSize: 13, color: "#666" }}>
+                    {(form.image as File).name}
+                  </div>
+                )}
             </div>
           </div>
         </div>

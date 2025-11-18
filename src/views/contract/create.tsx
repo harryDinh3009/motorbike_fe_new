@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useDebouncedApi } from "./useDebouncedApi";
 import ContainerBase from "@/component/common/block/container/ContainerBase";
 import BreadcrumbBase from "@/component/common/breadcrumb/Breadcrumb";
 import ButtonBase from "@/component/common/button/ButtonBase";
@@ -11,11 +12,22 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   getContractDetail,
   saveContract,
+  addContractCar,
+  updateContractCar,
+  deleteContractCar,
+  addSurcharge,
+  updateSurcharge,
+  deleteSurcharge,
+  getSurchargesByContractId,
 } from "@/service/business/contractMng/contractMng.service";
-import { getAllActiveBranches, getBranchByCurrentUser } from "@/service/business/branchMng/branchMng.service";
+import {
+  getAllActiveBranches,
+  getBranchByCurrentUser,
+} from "@/service/business/branchMng/branchMng.service";
 import { getAllActiveSurchargeTypes } from "@/service/business/surchargeTypeMng/surchargeTypeMng.service";
 import { getAllCustomers } from "@/service/business/customerMng/customerMng.service";
 import { ContractSaveDTO } from "@/service/business/contractMng/contractMng.type";
+import { message } from "antd"; // thêm import này
 
 const getPageTitle = (isEdit: boolean) =>
   isEdit ? "Cập nhật hợp đồng thuê xe" : "Tạo hợp đồng thuê xe";
@@ -95,7 +107,8 @@ function calcRentalInfo(
     }
     // Nếu trả xe trễ dưới 30 phút thì không tính thêm giờ phát sinh
     const msMod = ms % (1000 * 60 * 60);
-    if (days > 0 && msMod <= 1000 * 60 * 30 && extraHours > 0) {
+    // Sửa: chỉ trừ 1 giờ nếu msMod > 0 (tức là có phút lẻ), tránh trừ ở các mức tròn giờ
+    if (days > 0 && msMod > 0 && msMod <= 1000 * 60 * 30 && extraHours > 0) {
       extraHours -= 1;
       if (extraHours < 0) extraHours = 0;
     }
@@ -192,7 +205,7 @@ const ContractCreateComponent = () => {
       .catch(() => setCurrentBranchId(""));
   }, []);
 
-  // Khi ở mode sửa, load dữ liệu hợp đồng
+  // Khi ở mode sửa, load dữ liệu hợp đồng và phụ thu
   useEffect(() => {
     if (isEditMode && contractId) {
       getContractDetail(contractId).then((res) => {
@@ -215,47 +228,211 @@ const ContractCreateComponent = () => {
         setCarList(
           (c.cars || []).map((car) => ({
             id: car.carId,
+            carId: car.carId,
+            contractCarId: car.id,
             type: car.carType,
             name: car.carModel,
             plate: car.licensePlate,
             priceDay: car.dailyPrice || 0,
             priceHour: car.hourlyPrice || 0,
             total: car.totalAmount || 0,
-          }))
-        );
-        setFeeList(
-          (c.surcharges || []).map((fee) => ({
-            desc: fee.description || "",
-            amount: fee.amount || 0,
-            note: fee.notes || "",
+            startOdometer: car.startOdometer ?? null,
           }))
         );
         setPayment({
           deposit: c.depositAmount || 0,
-          method: "",
           total: c.finalAmount || 0,
           paid: c.paidAmount || 0,
           remain: c.remainingAmount || 0,
         });
       });
+      // Lấy danh sách phụ thu riêng biệt để luôn đồng bộ
+      getSurchargesByContractId(contractId).then((res) => {
+        setFeeList(
+          (res.data || []).map((fee) => ({
+            id: fee.id,
+            desc: fee.description || "",
+            amount: fee.amount || 0,
+            note: fee.notes || "",
+          }))
+        );
+      });
     }
     // eslint-disable-next-line
   }, [contractId]);
 
+  const handleRemoveCar = async (idx: number) => {
+    const car = carList[idx];
+    if (isEditMode && car.contractCarId) {
+      try {
+        await deleteContractCar(car.contractCarId);
+        setCarList(carList.filter((_, i) => i !== idx));
+        message.success("Đã xóa xe khỏi hợp đồng!");
+      } catch {
+        message.error("Xóa xe thất bại!");
+      }
+    } else {
+      setCarList(carList.filter((_, i) => i !== idx));
+    }
+  };
+
   // Thêm xe thuê từ modal
-  const handleAddCarFromModal = (cars: any[]) => {
-    setCarList([...carList, ...cars]);
+  const handleAddCarFromModal = async (cars: any[]) => {
+    if (isEditMode && contractId) {
+      // Thêm từng xe vào hợp đồng qua API, cập nhật state ngay khi xong từng xe
+      for (const car of cars) {
+        try {
+          await addContractCar({
+            contractId,
+            carId: car.carId || car.id,
+            dailyPrice: car.priceDay,
+            hourlyPrice: car.priceHour,
+            totalAmount: car.total,
+            startOdometer: car.startOdometer ?? null,
+            notes: "",
+          });
+          // Sau mỗi lần thêm, reload lại danh sách xe từ server để đồng bộ state
+          const res = await getContractDetail(contractId);
+          setCarList(
+            (res.data.cars || []).map((car) => ({
+              id: car.id,
+              carId: car.carId,
+              type: car.carType,
+              name: car.carModel,
+              plate: car.licensePlate,
+              priceDay: car.dailyPrice || 0,
+              priceHour: car.hourlyPrice || 0,
+              total: car.totalAmount || 0,
+              startOdometer: car.startOdometer ?? null,
+            }))
+          );
+        } catch {
+          message.error("Thêm xe vào hợp đồng thất bại!");
+        }
+      }
+    } else {
+      setCarList([...carList, ...cars]);
+    }
     setShowAddMotor(false);
   };
 
-  // Thêm phụ phí từ modal
-  const handleSaveFee = (fee: any) => {
-    if (editingFee !== null) {
-      // Sửa
-      setFeeList(feeList.map((f, idx) => (idx === editingFee ? fee : f)));
+  // Debounced API update for car
+  const debouncedUpdateCar = useDebouncedApi(async (carId, data) => {
+    try {
+      await updateContractCar(carId, data);
+    } catch {}
+  }, 600);
+
+  // Debounced API update for fee
+  const debouncedUpdateFee = useDebouncedApi(async (feeId, data) => {
+    try {
+      await updateSurcharge(feeId, data);
+    } catch {}
+  }, 600);
+
+  // Sửa giá/ngày, giá/giờ xe thuê (nếu là hợp đồng đã có trên server)
+  const handleChangeCarPrice = (
+    idx: number,
+    field: "priceDay" | "priceHour",
+    value: number
+  ) => {
+    const newCarList = [...carList];
+    newCarList[idx][field] = value;
+    setCarList(newCarList);
+
+    const car = newCarList[idx];
+    if (isEditMode && car.id) {
+      debouncedUpdateCar(car.id, {
+        carId: car.carId || car.id,
+        dailyPrice: car.priceDay,
+        hourlyPrice: car.priceHour,
+        totalAmount: car.total,
+        startOdometer: car.startOdometer ?? null,
+        notes: "",
+      });
+    }
+  };
+
+  // Xóa phụ phí (nếu là hợp đồng đã có trên server)
+  const handleRemoveFee = async (idx: number) => {
+    const fee = feeList[idx];
+    if (isEditMode && fee.id) {
+      try {
+        await deleteSurcharge(fee.id);
+        // Lấy lại danh sách phụ thu từ server để đồng bộ
+        if (contractId) {
+          const res = await getSurchargesByContractId(contractId);
+          setFeeList(
+            (res.data || []).map((fee) => ({
+              id: fee.id,
+              desc: fee.description || "",
+              amount: fee.amount || 0,
+              note: fee.notes || "",
+            }))
+          );
+        }
+        message.success("Đã xóa phụ thu!");
+      } catch {
+        message.error("Xóa phụ thu thất bại!");
+      }
     } else {
-      // Thêm mới
-      setFeeList([...feeList, fee]);
+      setFeeList(feeList.filter((_, i) => i !== idx));
+    }
+  };
+
+  // Thêm/Sửa phụ phí từ modal
+  const handleSaveFee = async (fee: any) => {
+    if (isEditMode && contractId) {
+      try {
+        if (editingFee !== null && feeList[editingFee]?.id) {
+          // Sửa phụ thu: gọi API updateSurcharge
+          const feeId = feeList[editingFee].id;
+          await updateSurcharge(feeId, {
+            id: feeId,
+            contractId,
+            description: fee.desc,
+            amount: fee.amount,
+            notes: fee.note,
+          });
+          // Lấy lại danh sách phụ thu từ server để đồng bộ
+          const res = await getSurchargesByContractId(contractId);
+          setFeeList(
+            (res.data || []).map((fee) => ({
+              id: fee.id,
+              desc: fee.description || "",
+              amount: fee.amount || 0,
+              note: fee.notes || "",
+            }))
+          );
+        } else {
+          // Thêm mới
+          await addSurcharge({
+            contractId,
+            description: fee.desc,
+            amount: fee.amount,
+            notes: fee.note,
+          });
+          // Lấy lại danh sách phụ thu từ server để đồng bộ
+          const res = await getSurchargesByContractId(contractId);
+          setFeeList(
+            (res.data || []).map((fee) => ({
+              id: fee.id,
+              desc: fee.description || "",
+              amount: fee.amount || 0,
+              note: fee.notes || "",
+            }))
+          );
+        }
+        message.success("Đã lưu phụ thu!");
+      } catch {
+        message.error("Lưu phụ thu thất bại!");
+      }
+    } else {
+      if (editingFee !== null) {
+        setFeeList(feeList.map((f, idx) => (idx === editingFee ? fee : f)));
+      } else {
+        setFeeList([...feeList, fee]);
+      }
     }
     setShowAddSurcharge(false);
     setEditingFee(null);
@@ -274,28 +451,6 @@ const ContractCreateComponent = () => {
         total: 0,
       },
     ]);
-  };
-
-  // Xóa xe thuê
-  const handleRemoveCar = (idx: number) => {
-    setCarList(carList.filter((_, i) => i !== idx));
-  };
-
-  // Thêm phụ phí
-  const handleAddFee = () => {
-    setFeeList([
-      ...feeList,
-      {
-        desc: "",
-        amount: 0,
-        note: "",
-      },
-    ]);
-  };
-
-  // Xóa phụ phí
-  const handleRemoveFee = (idx: number) => {
-    setFeeList(feeList.filter((_, i) => i !== idx));
   };
 
   const rentalStart = form.startDate;
@@ -317,7 +472,10 @@ const ContractCreateComponent = () => {
   });
 
   // Tổng tiền thuê xe theo công thức mới
-  const totalCar = carRentalList.reduce((sum, c) => sum + (c.rentalTotal || 0), 0);
+  const totalCar = carRentalList.reduce(
+    (sum, c) => sum + (c.rentalTotal || 0),
+    0
+  );
   // Tính tổng phụ phí
   const totalFee = feeList.reduce((sum, f) => sum + (f.amount || 0), 0);
   // Tính giảm giá
@@ -386,11 +544,29 @@ const ContractCreateComponent = () => {
       status: "CONFIRMED",
     };
     try {
-      await saveContract(contractPayload);
+      const res = await saveContract(contractPayload);
+      const newId =
+        (res &&
+          res.data &&
+          null) ||
+        contractId;
       alert(isEditMode ? "Đã cập nhật hợp đồng!" : "Đã lưu hợp đồng!");
-      navigate("/contract");
+      if (newId) {
+        navigate(`/contract/detail/${newId}`);
+      } else {
+        navigate("/contract");
+      }
     } catch (err) {
       alert("Lưu hợp đồng thất bại!");
+    }
+  };
+
+  // Hàm hủy thao tác (KHÔNG phải hủy hợp đồng)
+  const handleCancelContract = () => {
+    if (isEditMode && contractId) {
+      navigate(`/contract/detail/${contractId}`);
+    } else {
+      navigate("/contract");
     }
   };
 
@@ -506,7 +682,7 @@ const ContractCreateComponent = () => {
                   style={{ width: "100%", minWidth: 160 }}
                 />
               </div>
-              <div style={{ gridColumn: "span 2", marginBottom: 0 }}>
+              <div style={{ gridColumn: "span 2" }}>
                 <div
                   style={{
                     display: "grid",
@@ -686,42 +862,54 @@ const ContractCreateComponent = () => {
                     <td>{car.name}</td>
                     <td>{car.plate}</td>
                     <td>
-                      <input
-                        type="number"
-                        value={car.priceDay}
-                        onChange={(e) => {
-                          const newCarList = [...carList];
-                          newCarList[idx].priceDay = Number(e.target.value);
-                          setCarList(newCarList);
-                        }}
-                        className="input-edit"
-                        style={{
-                          width: 90,
-                          textAlign: "right",
-                          borderRadius: 6,
-                          border: "1px solid #eee",
-                          padding: "4px 8px",
-                        }}
-                      />
+                      {isEditMode ? (
+                        <span>{car.priceDay?.toLocaleString() || 0}</span>
+                      ) : (
+                        <input
+                          type="number"
+                          value={car.priceDay}
+                          onChange={(e) =>
+                            handleChangeCarPrice(
+                              idx,
+                              "priceDay",
+                              Number(e.target.value)
+                            )
+                          }
+                          className="input-edit"
+                          style={{
+                            width: 90,
+                            textAlign: "right",
+                            borderRadius: 6,
+                            border: "1px solid #eee",
+                            padding: "4px 8px",
+                          }}
+                        />
+                      )}
                     </td>
                     <td>
-                      <input
-                        type="number"
-                        value={car.priceHour}
-                        onChange={(e) => {
-                          const newCarList = [...carList];
-                          newCarList[idx].priceHour = Number(e.target.value);
-                          setCarList(newCarList);
-                        }}
-                        className="input-edit"
-                        style={{
-                          width: 90,
-                          textAlign: "right",
-                          borderRadius: 6,
-                          border: "1px solid #eee",
-                          padding: "4px 8px",
-                        }}
-                      />
+                      {isEditMode ? (
+                        <span>{car.priceHour?.toLocaleString() || 0}</span>
+                      ) : (
+                        <input
+                          type="number"
+                          value={car.priceHour}
+                          onChange={(e) =>
+                            handleChangeCarPrice(
+                              idx,
+                              "priceHour",
+                              Number(e.target.value)
+                            )
+                          }
+                          className="input-edit"
+                          style={{
+                            width: 90,
+                            textAlign: "right",
+                            borderRadius: 6,
+                            border: "1px solid #eee",
+                            padding: "4px 8px",
+                          }}
+                        />
+                      )}
                     </td>
                     <td
                       style={{
@@ -806,6 +994,13 @@ const ContractCreateComponent = () => {
                           const newFeeList = [...feeList];
                           newFeeList[idx].desc = e.target.value;
                           setFeeList(newFeeList);
+                          if (isEditMode && fee.id) {
+                            debouncedUpdateFee(fee.id, {
+                              description: e.target.value,
+                              amount: fee.amount,
+                              notes: fee.note,
+                            });
+                          }
                         }}
                         className="input-edit"
                         style={{
@@ -836,6 +1031,13 @@ const ContractCreateComponent = () => {
                           const newFeeList = [...feeList];
                           newFeeList[idx].amount = Number(e.target.value);
                           setFeeList(newFeeList);
+                          if (isEditMode && fee.id) {
+                            debouncedUpdateFee(fee.id, {
+                              description: fee.desc,
+                              amount: Number(e.target.value),
+                              notes: fee.note,
+                            });
+                          }
                         }}
                         className="input-edit"
                         style={{
@@ -855,6 +1057,13 @@ const ContractCreateComponent = () => {
                           const newFeeList = [...feeList];
                           newFeeList[idx].note = e.target.value;
                           setFeeList(newFeeList);
+                          if (isEditMode && fee.id) {
+                            debouncedUpdateFee(fee.id, {
+                              description: fee.desc,
+                              amount: fee.amount,
+                              notes: e.target.value,
+                            });
+                          }
                         }}
                         className="input-edit"
                         style={{
@@ -1061,8 +1270,23 @@ const ContractCreateComponent = () => {
 
         <div
           className="dp_flex"
-          style={{ justifyContent: "flex-end", margin: "24px 0" }}
+          style={{ justifyContent: "flex-end", margin: "24px 0", gap: 12 }}
         >
+          <ButtonBase
+            label="Hủy"
+            className="btn_lightgray"
+            style={{
+              minWidth: 140,
+              fontWeight: 600,
+              fontSize: 16,
+              borderRadius: 8,
+              padding: "10px 24px",
+              border: "1px solid #ff4d4f",
+              color: "#ff4d4f",
+              background: "#fff",
+            }}
+            onClick={handleCancelContract}
+          />
           <ButtonBase
             label={isEditMode ? "Cập nhật hợp đồng" : "Lưu hợp đồng"}
             className="contract-action-btn"
@@ -1081,16 +1305,7 @@ const ContractCreateComponent = () => {
         <ModalAddMotor
           open={showAddMotor}
           onClose={() => setShowAddMotor(false)}
-          onAdd={(cars: any[]) => {
-            setCarList([
-              ...carList,
-              ...cars.map((car) => ({
-                ...car,
-                id: car.id || "",
-              })),
-            ]);
-            setShowAddMotor(false);
-          }}
+          onAdd={handleAddCarFromModal}
           startDate={form.startDate}
           endDate={form.endDate}
         />
